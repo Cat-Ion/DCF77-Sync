@@ -1,0 +1,6 @@
+[submodule "FixedPoint"]
+	path = FixedPoint
+	url = https://github.com/Cat-Ion/FixedPoint
+[submodule "libopencm3"]
+	path = libopencm3
+	url = https://github.com/libopencm3/libopencm3.git
