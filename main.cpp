@@ -96,8 +96,10 @@ constexpr Number State::PI2;
 static State state = State();
 
 void setup_gpios(void) {
+#ifdef PWM_DEBUGGING
     rcc_periph_clock_enable(RCC_GPIOA);
     gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO8);
+#endif
 }
 
 void setup_clocks(void) {
