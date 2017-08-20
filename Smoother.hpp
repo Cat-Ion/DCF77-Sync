@@ -1,34 +1,22 @@
 #ifndef SMOOTHER_HPP
 #define SMOOTHER_HPP
 
-template <typename T>
-class ISmoother
+template <typename T, int n> class Smoother
 {
 public:
-    constexpr ISmoother(T const &alpha = 1, T const &v = 0) : alpha(alpha), beta(T(1)-T(alpha)), v(v) {}
-
     T alpha, beta;
     T v;
-
-    constexpr T operator*() const {
-        return v;
-    }
-};
-
-template <typename T, int n> class Smoother: public ISmoother<T>
-{
-public:
     T s[n-1];
 
     constexpr Smoother(T const &alpha = 1, T const &v = 0)
-        : ISmoother<T>(alpha, v)
+        : alpha(alpha), beta(T(1)-T(alpha)), v(v)
     {
         for (int i = 0; i < n - 1; i++) {
             s[i] = v;
         }
     }
 
-    constexpr ISmoother<T> &operator<<(T const &v) __attribute__ (( noinline )) {
+    constexpr Smoother &operator<<(T const &v) __attribute__ (( noinline )) {
         T a(v);
         for (int i = 0; i < n - 1; i++) {
             s[i] *= this->beta;
@@ -49,15 +37,24 @@ public:
         }
         this->v += a;
     }
+
+    constexpr T operator*() const {
+        return v;
+    }
 };
-template <typename T> class Smoother<T, 0>: public ISmoother<T> {
+
+template <typename T> class Smoother<T, 0>
+{
 public:
+    T alpha, beta;
+    T v;
+
     constexpr Smoother(T const &alpha = 1, T const &v = 0)
-        : ISmoother<T>(alpha, v)
+        : alpha(alpha), beta(T(1)-T(alpha)), v(v)
     {
     }
 
-    constexpr ISmoother<T> &operator<<(T const &v) {
+    constexpr Smoother &operator<<(T const &v) {
         this->v = v;
         return *this;
     }
@@ -66,5 +63,10 @@ public:
     {
         this->v += a;
     }
+
+    constexpr T operator*() const {
+        return v;
+    }
 };
+
 #endif // SMOOTHER_HPP
