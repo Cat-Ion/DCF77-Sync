@@ -22,12 +22,10 @@ OBJECTS_DIR   = ./
 
 SOURCES       = main.cpp 
 OBJECTS       = main.o
-DIST          = Smoother.hpp main.cpp
-DESTDIR       = 
-TARGET        = DCF77-Firmware
+TARGET        = DCF77-Sync
 
 
-all: Makefile $(TARGET)
+all: $(TARGET)
 ####### Build rules
 
 $(TARGET): Makefile $(OBJECTS) generated.$(MCU).ld 
@@ -36,13 +34,12 @@ $(TARGET): Makefile $(OBJECTS) generated.$(MCU).ld
 clean: 
 	rm -f $(OBJECTS) generated.$(MCU).ld
 
-distclean: clean 
-	rm -f $(TARGET) 
-
 ####### Compile
 
-main.o: Makefile main.cpp Smoother.hpp 
+main.o: Makefile main.cpp Smoother.hpp PID.hpp SigmaDelta.hpp
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o main.cpp
 
 generated.$(MCU).ld: Makefile
 	$(CXX) -E $(CFLAGS) -D_ROM=64K -D_RAM=20K -D_ROM_OFF=0x08000000 -D_RAM_OFF=0x20000000  -P -E libopencm3//ld/linker.ld.S > $@
+
+.PHONY: clean all
