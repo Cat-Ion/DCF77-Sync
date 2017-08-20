@@ -41,7 +41,7 @@ public:
     }
 
     void process_measurement(Number vn)
-    __attribute__ (( noinline )) {
+    {
         switch(iter) {
         case 0:
             i << vn;
