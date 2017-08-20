@@ -21,6 +21,8 @@ typedef FixedPoint<4, 27> Number;
 typedef FixedPoint<12, 19> BigNumber;
 typedef FixedPoint<12, 51> HugeNumber;
 
+#define PWM_DEBUGGING 1
+
 class State {
 public:
     Smoother<Number, 1> i;
@@ -188,6 +190,7 @@ void setup_pwm(void) {
     TIM1_ARR = 4096;
     TIM1_EGR = TIM_EGR_UG;
 
+#ifdef PWM_DEBUGGING
     // Channel 1
     TIM1_CCMR1 = TIM_CCMR1_OC1M_PWM1 | TIM_CCMR1_OC1PE;
     TIM1_CCER = TIM_CCER_CC1E;
@@ -197,6 +200,7 @@ void setup_pwm(void) {
     TIM1_CCMR1 |= TIM_CCMR1_OC2M_PWM1 | TIM_CCMR1_OC2PE;
     TIM1_CCER |= TIM_CCER_CC2E;
     TIM1_CCR2 = 2048;
+#endif
 
     // Run
     TIM1_CR1 |= TIM_CR1_ARPE;
@@ -238,6 +242,7 @@ int main() {
             if (++iter == 10) {
                 iter = 0;
                 state.calculate_phase();
+                // Don't bother to calculate huge errors, just use ±pi
                 if (state.phase_count < 0) {
                     phase = -M_PI;
                 } else if (state.phase_count > 0) {
@@ -246,6 +251,9 @@ int main() {
                     phase = *state.phase;
                 }
                 pid.step(phase);
+                sdm.setpoint = pid.output();
+#ifdef PWM_DEBUGGING
+                // Debugging stuff: Show the phase and PID output with PWM until we have something better (USB?)
                 if (std::abs(phase) > BigNumber(M_PI/10)) {
                     if (phase.is_negative()) {
                         phase = -M_PI/10;
@@ -255,7 +263,7 @@ int main() {
                 }
                 TIM1_CCR1 = int32_t(BigNumber(phase)*BigNumber(2040./M_PI))+2048;
                 TIM1_CCR2 = int32_t(BigNumber(pid.output())*int64_t(2040./64.)) + 2048;
-                sdm.setpoint = pid.output();
+#endif
             }
         }
     }
@@ -263,7 +271,9 @@ int main() {
 
 
 void adc1_2_isr(void) {
+#ifdef PWM_DEBUGGING
     gpio_toggle(GPIOA, GPIO_TIM1_CH3);
+#endif
     current_measurement = adc_read_regular(ADC1) - (1<<11);
     got_new_measurement = 1;
     sdm.step();
