@@ -1,0 +1,4 @@
+DCF77-Firmware
+generated.*.ld
+*.o
+*.map
