@@ -212,7 +212,6 @@ void setup_pwm(void) {
 
 static volatile  int32_t current_measurement = 0;
 static volatile uint32_t got_new_measurement = 0;
-static volatile uint32_t calculate_new_phase = 0;
 SigmaDelta<BigNumber, int32_t> sdm;
 static constexpr PID<HugeNumber, true, true, true> pidstart(
         /*kp*/       4. * 0.2 / 2,
