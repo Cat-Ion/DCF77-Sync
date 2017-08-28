@@ -28,17 +28,16 @@ public:
         }
     }
 
-    constexpr ISmoother<T> &operator<<(T const &v) __attribute__ (( noinline )) {
-        T a(v);
+    constexpr ISmoother<T> &operator<<(T v) __attribute__ (( noinline )) {
         for (int i = 0; i < n - 1; i++) {
             s[i] *= this->beta;
-            a    *= this->alpha;
-            a   += s[i];
-            s[i] = a;
+            v    *= this->alpha;
+            v    += s[i];
+            s[i]  = v;
         }
-        a *= this->alpha;
         this->v *= this->beta;
-        this->v += a;
+        v *= this->alpha;
+        this->v += v;
         return *this;
     }
 

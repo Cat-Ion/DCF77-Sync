@@ -9,8 +9,9 @@ public:
         , integral(0)
     {}
 
-    void step() {
-        integral += setpoint - InputType(int(output()));
+    OutputType step() __attribute__ ((noinline)) {
+        integral += setpoint - InputType(output());
+        return output();
     }
 
     OutputType output() const {

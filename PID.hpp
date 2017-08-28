@@ -28,7 +28,7 @@ public:
         _setpoint = sp;
     }
 
-    constexpr void step(T value) {
+    constexpr void step(T const &value) {
         T new_error = _setpoint - value;
         T tmp;
 

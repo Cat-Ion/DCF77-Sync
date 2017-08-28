@@ -9,6 +9,8 @@
 #include "Smoother.hpp"
 #include "PID.hpp"
 #include "SigmaDelta.hpp"
+#include "ringbuffer.h"
+#include "usb.h"
 
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/stm32/rcc.h>
@@ -16,6 +18,7 @@
 #include <libopencm3/stm32/flash.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/usb/usbd.h>
 
 typedef FixedPoint<4, 27> Number;
 typedef FixedPoint<12, 19> BigNumber;
@@ -110,9 +113,9 @@ void setup_clocks(void) {
 
     flash_set_ws(FLASH_ACR_LATENCY_2WS); // 0 with 0-24, 1 with 24-48, 2 with 48-72 MHz
 
-    rcc_set_pll_multiplication_factor(RCC_CFGR_PLLMUL_PLL_CLK_MUL14);
+    rcc_set_pll_multiplication_factor(RCC_CFGR_PLLMUL_PLL_CLK_MUL9);
     rcc_set_pll_source(RCC_CFGR_PLLSRC_HSE_CLK);
-    rcc_set_pllxtpre(RCC_CFGR_PLLXTPRE_HSE_CLK_DIV2);
+    rcc_set_pllxtpre(RCC_CFGR_PLLXTPRE_HSE_CLK);
 
     rcc_osc_on(RCC_PLL);
     rcc_wait_for_osc_ready(RCC_PLL);
@@ -120,9 +123,9 @@ void setup_clocks(void) {
     rcc_set_sysclk_source(RCC_CFGR_SW_SYSCLKSEL_PLLCLK);
 
     uint32_t hse_frequency = 8000000;
-    rcc_ahb_frequency = hse_frequency / 2 * 14;
-    rcc_apb1_frequency = hse_frequency / 2 * 14 / 2;
-    rcc_apb2_frequency = hse_frequency / 2 * 14;
+    rcc_ahb_frequency = hse_frequency * 9;
+    rcc_apb1_frequency = hse_frequency * 9 / 2;
+    rcc_apb2_frequency = hse_frequency * 9;
 }
 
 void setup_adc(void) {
@@ -191,12 +194,12 @@ void setup_pwm(void) {
     // Channel 1
     TIM1_CCMR1 = TIM_CCMR1_OC1M_PWM1 | TIM_CCMR1_OC1PE;
     TIM1_CCER = TIM_CCER_CC1E;
-    TIM1_CCR1 = 2048;
+    TIM1_CCR1 = 10;
 
     // Channel 2
     TIM1_CCMR1 |= TIM_CCMR1_OC2M_PWM1 | TIM_CCMR1_OC2PE;
     TIM1_CCER |= TIM_CCER_CC2E;
-    TIM1_CCR2 = 2048;
+    TIM1_CCR2 = 1;
 
     // Run
     TIM1_CR1 |= TIM_CR1_ARPE;
@@ -207,17 +210,19 @@ void setup_pwm(void) {
 static volatile  int32_t current_measurement = 0;
 static volatile uint32_t got_new_measurement = 0;
 static volatile uint32_t calculate_new_phase = 0;
-SigmaDelta<BigNumber, int32_t> sdm;
+SigmaDelta<BigNumber, FixedPoint<31,0>> sdm;
+static const double ku = 0.52, tu = 8./20;
 static constexpr PID<HugeNumber, true, true, true> pidstart(
-        /*kp*/       4. * 0.2 / 2,
-        /*ki*/       4. * 0.2 / (0.2/2.) / 4,
-        /*kd*/       4. * 0.2 * (0.2/3.),
+        /*kp*/       ku*0.6,
+        /*ki*/       ku*0.6 / (tu/2.5),
+        /*kd*/       ku*0.6 * (3*tu/20),
         /*interval*/ 1e-3,
-        /*min*/      -16.,
-        /*max*/      +16.,
+        /*min*/      -64.,
+        /*max*/      +64.,
         /*setpoint*/ 0.);
 int main() {
     PID<HugeNumber, true, true, true> pid = pidstart;
+    uint32_t packet_ctr = 0;
 
     setup_gpios();
     setup_clocks();
@@ -227,35 +232,70 @@ int main() {
     gpio_set_mode(GPIOA, GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO_TIM1_CH3);
 
     int iter = 0;
-    BigNumber phase = 0;
-    gpio_toggle(GPIOA, GPIO_TIM1_CH2);
+    BigNumber phase = 0.;
+    for (int i = 0; i < 100; i++) {
+        while(!got_new_measurement);
+        got_new_measurement = 0;
+        state.process_measurement(Number(3.6/2048)*int64_t(current_measurement));
+    }
+
+    usbd_device *usbd_dev = usb_init(&st_usbfs_v1_usb_driver, "stm32f103-generic");
+
     while(1) {
-        __asm__("wfi");
+        usb_run(usbd_dev);
         if (got_new_measurement) {
+            got_new_measurement = 0;
             Number v = 3.6/2048;
             v *= int64_t(current_measurement);
             state.process_measurement(v);
-            if (++iter == 10) {
+            switch(++iter) {
+            case 10:
                 iter = 0;
                 state.calculate_phase();
-                if (state.phase_count < 0) {
-                    phase = -M_PI;
-                } else if (state.phase_count > 0) {
-                    phase = M_PI;
-                } else {
-                    phase = *state.phase;
-                }
+                break;
+            case 1:
+                phase = BigNumber(*state.phase) + BigNumber(2*M_PI)*int64_t(state.phase_count);
+                break;
+            case 2:
                 pid.step(phase);
-                if (std::abs(phase) > BigNumber(M_PI/10)) {
+                sdm.setpoint = pid.output();
+                break;
+            case 3:
+                uint8_t data[4 +
+                        BigNumber::StorageType::storageSize
+                        * BigNumber::StorageType::numWords
+                        / 8 * 2];
+                data[0] = packet_ctr;
+                data[1] = packet_ctr >> 8;
+                data[2] = packet_ctr >> 16;
+                data[3] = packet_ctr >> 24;
+                phase.get_raw(data + 4);
+                BigNumber(pid.output()).get_raw(data + sizeof(data)/2 + 2);
+                usbd_ep_write_packet(usbd_dev, 0x82, data, sizeof(data));
+                packet_ctr++;
+                break;
+            case 4:
+                if (std::abs(phase) > BigNumber(M_PI)) {
                     if (phase.is_negative()) {
-                        phase = -M_PI/10;
+                        phase = -M_PI;
                     } else {
-                        phase = M_PI/10;
+                        phase = M_PI;
                     }
                 }
-                TIM1_CCR1 = int32_t(BigNumber(phase)*BigNumber(2040./M_PI))+2048;
-                TIM1_CCR2 = int32_t(BigNumber(pid.output())*int64_t(2040./64.)) + 2048;
-                sdm.setpoint = pid.output();
+
+                TIM1_CCR1 = int32_t(BigNumber(phase)*BigNumber(2040/M_PI))+2048;
+                TIM1_CCR2 = int32_t(pid.output()*int64_t(2040./1.)) + 2048;
+                break;
+            case 5:
+                break;
+            case 6:
+                break;
+            case 7:
+                break;
+            case 8:
+                break;
+            case 9:
+                break;
             }
         }
     }
@@ -263,9 +303,12 @@ int main() {
 
 
 void adc1_2_isr(void) {
-    gpio_toggle(GPIOA, GPIO_TIM1_CH3);
+    static int i = 0;
+    if (++i == 2) {
+        gpio_toggle(GPIOA, GPIO_TIM1_CH3);
+        i = 0;
+    }
     current_measurement = adc_read_regular(ADC1) - (1<<11);
     got_new_measurement = 1;
-    sdm.step();
-    timer_set_period(TIM3, 5600 + sdm.output());
+    timer_set_period(TIM3, 7200 + int32_t(sdm.step()));
 }
